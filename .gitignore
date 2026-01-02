@@ -1,11 +1,10 @@
-# Python
+# Python envs
 venv/
+convert_env/
+
+# Caches
 __pycache__/
 *.pyc
 
-# Audio files
-*.wav
-
 # OS
 .DS_Store
-

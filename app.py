@@ -1,47 +1,63 @@
-from fastapi import FastAPI, UploadFile, File
-import tempfile, os, json
-import joblib
-import pandas as pd
+from fastapi import FastAPI, File, UploadFile
+import numpy as np
+import onnxruntime as ort
+import json
+import tempfile
+import os
 
 from utils.feature_extractor import extract_features
 
 app = FastAPI(title="NeuroVoice ML Service")
 
-# ===== Load model artifacts ONCE =====
-MODEL_PATH = "models/neurovoice_model_v4_calibrated.pkl"
-SCALER_PATH = "models/scaler_v3.joblib"
-FEATURES_PATH = "models/feature_cols_v4_calibrated.json"
+# ---------- LOAD ONNX MODEL ----------
+MODEL_PATH = "models/neurovoice_model.onnx"
+FEATURE_COLS_PATH = "models/feature_cols_v4_calibrated.json"
 
-model = joblib.load(MODEL_PATH)
-scaler = joblib.load(SCALER_PATH)
+session = ort.InferenceSession(
+    MODEL_PATH,
+    providers=["CPUExecutionProvider"]
+)
 
-with open(FEATURES_PATH) as f:
-    FEATURE_COLUMNS = json.load(f)
+# Load expected feature order
+with open(FEATURE_COLS_PATH, "r") as f:
+    FEATURE_COLS = json.load(f)
 
-# ===== Prediction endpoint =====
+
+# ---------- HEALTH CHECK ----------
+@app.get("/")
+def health():
+    return {"status": "ok"}
+
+
+# ---------- PREDICTION ----------
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
+    # Save uploaded wav temporarily
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
         tmp.write(await file.read())
-        audio_path = tmp.name
+        wav_path = tmp.name
 
     try:
-        features = extract_features(audio_path)
+        # Extract features
+        features_dict = extract_features(wav_path)
 
-        df = pd.DataFrame([features])
-        for col in FEATURE_COLUMNS:
-            if col not in df:
-                df[col] = 0.0
+        # Order features exactly as during training
+        feature_vector = np.array(
+            [[features_dict[col] for col in FEATURE_COLS]],
+            dtype=np.float32
+        )
 
-        df = df[FEATURE_COLUMNS]
-        X = scaler.transform(df)
+        # Run ONNX inference
+        input_name = session.get_inputs()[0].name
+        outputs = session.run(None, {input_name: feature_vector})
 
-        probability = model.predict_proba(X)[0][1]
+        probability = float(outputs[0][0][1])
+        prediction = probability >= 0.5
 
         return {
-            "parkinsons_detected": bool(probability >= 0.5),
-            "confidence": round(float(probability), 4)
+            "parkinsons_detected": prediction,
+            "confidence": round(probability, 4)
         }
 
     finally:
-        os.remove(audio_path)
+        os.remove(wav_path)
