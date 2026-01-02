@@ -42,7 +42,7 @@ async def predict(file: UploadFile = File(...)):
 
         y = librosa.util.normalize(y)
 
-        features_dict = extract_features(y, sr)
+        features_dict = extract_features(y)
 
         # 🔑 Enforce training feature order
         features = [features_dict[col] for col in FEATURE_COLS]
