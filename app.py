@@ -56,6 +56,8 @@ async def predict(file: UploadFile = File(...)):
         confidence = float(np.squeeze(preds))
         detected = confidence >= 0.5
 
+        print("RAW ONNX OUTPUT:", preds, preds.shape)
+
         print("🧠 Confidence:", confidence)
 
         return {
