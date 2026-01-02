@@ -1,0 +1,11 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Audio files
+*.wav
+
+# OS
+.DS_Store
+
