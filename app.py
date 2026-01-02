@@ -49,7 +49,7 @@ async def predict(file: UploadFile = File(...)):
         # ONNX inference
         preds = session.run(None, {"input": X})[0]
 
-        confidence = float(preds[0][0])
+        confidence = float(np.squeeze(preds))
         detected = confidence >= 0.5
 
         return {
