@@ -29,7 +29,6 @@ def health():
 # ---------- PREDICTION ----------
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    print("🔢 Feature vector length:", len(feature_vector))
     try:
         # Save uploaded WAV
         temp_path = f"/tmp/{uuid.uuid4()}.wav"
@@ -47,6 +46,7 @@ async def predict(file: UploadFile = File(...)):
 
         # ⚠️ MUST return a LIST or 1D array (length = model feature count)
         feature_vector = extract_features(y, sr)
+        print("🔢 Feature vector length:", len(feature_vector))
 
         X = np.asarray(feature_vector, dtype=np.float32).reshape(1, -1)
 
