@@ -18,8 +18,6 @@ session = ort.InferenceSession(
 )
 
 # Detect correct input name automatically
-INPUT_NAME = session.get_inputs()[0].name
-print("🧠 ONNX input name:", INPUT_NAME)
 
 # ---------- HEALTH CHECK ----------
 @app.get("/")
@@ -51,12 +49,15 @@ async def predict(file: UploadFile = File(...)):
         X = np.asarray(feature_vector, dtype=np.float32).reshape(1, -1)
 
         # ONNX inference
-        preds = session.run(None, {INPUT_NAME: X})[0]
+        outputs = session.run(None, {"input": X})
 
-        confidence = float(np.squeeze(preds))
+        label = int(outputs[0][0])  # 0 or 1
+        proba_dict = outputs[1][0]  # {0: p0, 1: p1}
+
+        confidence = float(proba_dict[1])
         detected = confidence >= 0.5
 
-        print("RAW ONNX OUTPUT:", preds, preds.shape)
+        print("RAW ONNX OUTPUT:", outputs)
 
         print("🧠 Confidence:", confidence)
 
