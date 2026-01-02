@@ -1,10 +1,11 @@
-from fastapi import FastAPI, File, UploadFile
-import numpy as np
-import onnxruntime as ort
 import json
-import tempfile
-import os
+import uuid
+import traceback
+import numpy as np
+import librosa
+import onnxruntime as ort
 
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from utils.feature_extractor import extract_features
 
 app = FastAPI(title="NeuroVoice ML Service")
@@ -18,46 +19,51 @@ session = ort.InferenceSession(
     providers=["CPUExecutionProvider"]
 )
 
-# Load expected feature order
 with open(FEATURE_COLS_PATH, "r") as f:
     FEATURE_COLS = json.load(f)
-
 
 # ---------- HEALTH CHECK ----------
 @app.get("/")
 def health():
     return {"status": "ok"}
 
-
 # ---------- PREDICTION ----------
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    # Save uploaded wav temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-        tmp.write(await file.read())
-        wav_path = tmp.name
-
     try:
-        # Extract features
-        features_dict = extract_features(wav_path)
+        temp_path = f"/tmp/{uuid.uuid4()}.wav"
+        with open(temp_path, "wb") as f:
+            f.write(await file.read())
 
-        # Order features exactly as during training
-        feature_vector = np.array(
-            [[features_dict[col] for col in FEATURE_COLS]],
-            dtype=np.float32
-        )
+        y, sr = librosa.load(temp_path, sr=16000, mono=True)
 
-        # Run ONNX inference
-        input_name = session.get_inputs()[0].name
-        outputs = session.run(None, {input_name: feature_vector})
+        if len(y) < sr:
+            raise ValueError("Audio too short (<1s)")
 
-        probability = float(outputs[0][0][1])
-        prediction = probability >= 0.5
+        y = librosa.util.normalize(y)
+
+        features_dict = extract_features(y, sr)
+
+        # 🔑 Enforce training feature order
+        features = [features_dict[col] for col in FEATURE_COLS]
+
+        features = np.array(features, dtype=np.float32).reshape(1, -1)
+
+        preds = session.run(None, {"input": features})[0]
+
+        confidence = float(preds[0][0])
+        detected = confidence >= 0.5
 
         return {
-            "parkinsons_detected": prediction,
-            "confidence": round(probability, 4)
+            "parkinsons_detected": detected,
+            "confidence": confidence
         }
 
-    finally:
-        os.remove(wav_path)
+    except Exception as e:
+        print("❌ Prediction error:", str(e))
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Inference failed: {str(e)}"
+        )
