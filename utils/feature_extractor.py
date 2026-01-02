@@ -1,12 +1,24 @@
 import librosa
 import numpy as np
+import json
+import os
 
-def extract_features(y: np.ndarray, sr: int = 16000) -> dict:
+# Load feature order ONCE
+FEATURE_COLS_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "models",
+    "feature_cols_v4_calibrated.json",
+)
+
+with open(FEATURE_COLS_PATH, "r") as f:
+    FEATURE_COLS = json.load(f)
+
+
+def extract_features(y: np.ndarray, sr: int = 16000) -> list:
     """
-    Extract voice features from a waveform.
-    Assumes:
-    - y is a mono waveform
-    - sr is the sample rate (default 16kHz)
+    Extract voice features and return a FIXED ordered feature vector
+    compatible with the trained ONNX model.
     """
 
     # ---------- PITCH ----------
@@ -21,8 +33,8 @@ def extract_features(y: np.ndarray, sr: int = 16000) -> dict:
     pitch_min = np.min(pitch_vals)
     pitch_max = np.max(pitch_vals)
 
-    # ---------- FEATURES ----------
     features = {
+        # Pitch
         "pitch_mean": pitch_mean,
         "pitch_std": pitch_std,
         "pitch_min": pitch_min,
@@ -30,11 +42,19 @@ def extract_features(y: np.ndarray, sr: int = 16000) -> dict:
         "pitch_range": pitch_max - pitch_min,
         "pitch_cv": pitch_std / (pitch_mean + 1e-6),
 
+        # Jitter / Shimmer (basic)
         "jitter_local": np.std(np.diff(pitch_vals)) if len(pitch_vals) > 1 else 0.0,
         "shimmer_local": np.std(np.abs(y)),
 
+        # Voice breaks
         "fraction_unvoiced": float((y == 0).mean()),
         "num_voice_breaks": int((np.diff(y == 0) == 1).sum()),
     }
 
-    return features
+    # ---------- FILL MISSING FEATURES SAFELY ----------
+    for col in FEATURE_COLS:
+        if col not in features:
+            features[col] = 0.0
+
+    # ---------- RETURN ORDERED VECTOR ----------
+    return [features[col] for col in FEATURE_COLS]

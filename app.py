@@ -12,15 +12,11 @@ app = FastAPI(title="NeuroVoice ML Service")
 
 # ---------- LOAD ONNX MODEL ----------
 MODEL_PATH = "models/neurovoice_model.onnx"
-FEATURE_COLS_PATH = "models/feature_cols_v4_calibrated.json"
 
 session = ort.InferenceSession(
     MODEL_PATH,
     providers=["CPUExecutionProvider"]
 )
-
-with open(FEATURE_COLS_PATH, "r") as f:
-    FEATURE_COLS = json.load(f)
 
 # ---------- HEALTH CHECK ----------
 @app.get("/")
@@ -31,25 +27,27 @@ def health():
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     try:
+        # Save uploaded WAV
         temp_path = f"/tmp/{uuid.uuid4()}.wav"
         with open(temp_path, "wb") as f:
             f.write(await file.read())
 
+        # Load audio
         y, sr = librosa.load(temp_path, sr=16000, mono=True)
 
         if len(y) < sr:
-            raise ValueError("Audio too short (<1s)")
+            raise ValueError("Audio too short (< 1 second)")
 
+        # Normalize audio
         y = librosa.util.normalize(y)
 
-        features_dict = extract_features(y, sr)
+        # ✅ Extract ORDERED feature vector (length = 44)
+        feature_vector = extract_features(y, sr)
 
-        # 🔑 Enforce training feature order
-        features = [features_dict[col] for col in FEATURE_COLS]
+        X = np.array(feature_vector, dtype=np.float32).reshape(1, -1)
 
-        features = np.array(features, dtype=np.float32).reshape(1, -1)
-
-        preds = session.run(None, {"input": features})[0]
+        # ONNX inference
+        preds = session.run(None, {"input": X})[0]
 
         confidence = float(preds[0][0])
         detected = confidence >= 0.5
